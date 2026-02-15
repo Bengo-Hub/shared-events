@@ -9,15 +9,16 @@ import (
 
 // Event represents a domain event with standard fields.
 type Event struct {
-	ID          uuid.UUID              `json:"id"`
-	EventType   string                 `json:"event_type"`
-	AggregateType string               `json:"aggregate_type"`
-	AggregateID uuid.UUID              `json:"aggregate_id"`
-	TenantID    uuid.UUID              `json:"tenant_id"`
-	Payload     map[string]interface{} `json:"payload"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Version     string                 `json:"version,omitempty"` // Event schema version
+	ID            uuid.UUID              `json:"id"`
+	EventType     string                 `json:"event_type"`
+	AggregateType string                 `json:"aggregate_type"`
+	AggregateID   uuid.UUID              `json:"aggregate_id"`
+	TenantID      uuid.UUID              `json:"tenant_id"`
+	TenantSlug    string                 `json:"tenant_slug,omitempty"`
+	Payload       map[string]interface{} `json:"payload"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	Timestamp     time.Time              `json:"timestamp"`
+	Version       string                 `json:"version,omitempty"` // Event schema version
 }
 
 // NewEvent creates a new event with standard fields.
@@ -53,6 +54,12 @@ func FromJSON(data []byte) (*Event, error) {
 // Format: {aggregate_type}.{event_type}
 func (e *Event) Subject() string {
 	return e.AggregateType + "." + e.EventType
+}
+
+// WithTenantSlug sets the tenant slug on the event.
+func (e *Event) WithTenantSlug(slug string) *Event {
+	e.TenantSlug = slug
+	return e
 }
 
 // WithMetadata adds metadata to the event.
