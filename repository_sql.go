@@ -121,17 +121,18 @@ func (r *SQLOutboxRepository) GetPendingRecords(ctx context.Context, limit int) 
 	return records, nil
 }
 
-// MarkAsPublished marks an event as successfully published.
-func (r *SQLOutboxRepository) MarkAsPublished(ctx context.Context, id uuid.UUID, publishedAt time.Time) error {
-	query := `
-		UPDATE outbox_events
-		SET status = $1, published_at = $2
-		WHERE id = $3
-	`
-
-	result, err := r.db.ExecContext(ctx, query, StatusPublished, publishedAt, id)
+// MarkAsPublished removes a successfully-published event from the outbox.
+//
+// Successful events are DELETED immediately rather than retained as PUBLISHED:
+// once an event has been accepted by JetStream the broker owns delivery to all
+// durable consumers, so the outbox row has fulfilled its purpose. Keeping only
+// FAILED rows (for troubleshooting) keeps the production outbox tables thin and
+// preserves storage. The publishedAt argument is retained for interface
+// compatibility but is no longer persisted.
+func (r *SQLOutboxRepository) MarkAsPublished(ctx context.Context, id uuid.UUID, _ time.Time) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM outbox_events WHERE id = $1`, id)
 	if err != nil {
-		return fmt.Errorf("update outbox record: %w", err)
+		return fmt.Errorf("delete published outbox record: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -146,15 +147,23 @@ func (r *SQLOutboxRepository) MarkAsPublished(ctx context.Context, id uuid.UUID,
 	return nil
 }
 
-// MarkAsFailed marks an event as failed and increments attempts.
+// MarkAsFailed records a failed publish attempt. It increments the attempt
+// counter and keeps the event PENDING for another retry until it reaches
+// MaxOutboxAttempts, at which point it is parked as FAILED (terminal) so the
+// poller stops selecting it. This bounds retries and prevents the busy-retry
+// loop that occurs when an undeliverable event is perpetually reset to PENDING.
+// FAILED rows are deliberately retained for troubleshooting.
 func (r *SQLOutboxRepository) MarkAsFailed(ctx context.Context, id uuid.UUID, errorMessage string, lastAttemptAt time.Time) error {
 	query := `
 		UPDATE outbox_events
-		SET status = $1, attempts = attempts + 1, last_attempt_at = $2, error_message = $3
-		WHERE id = $4
+		SET attempts = attempts + 1,
+		    last_attempt_at = $1,
+		    error_message = $2,
+		    status = CASE WHEN attempts + 1 >= $3 THEN $4 ELSE $5 END
+		WHERE id = $6
 	`
 
-	_, err := r.db.ExecContext(ctx, query, StatusPending, lastAttemptAt, errorMessage, id)
+	_, err := r.db.ExecContext(ctx, query, lastAttemptAt, errorMessage, MaxOutboxAttempts, StatusFailed, StatusPending, id)
 	if err != nil {
 		return fmt.Errorf("update outbox record: %w", err)
 	}

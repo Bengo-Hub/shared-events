@@ -41,11 +41,11 @@ func DefaultPublisherConfig(js nats.JetStreamContext, repo OutboxRepository, log
 		JetStream:    js,
 		Repository:   repo,
 		Logger:       logger,
-		MaxRetries:   5,
+		MaxRetries:   MaxOutboxAttempts,
 		RetryDelay:   5 * time.Second,
 		BatchSize:    100,
 		PollInterval: 2 * time.Second,
-		MaxAttempts:  10,
+		MaxAttempts:  MaxOutboxAttempts,
 	}
 }
 
