@@ -29,6 +29,13 @@ const (
 	StatusPending   = "PENDING"
 	StatusPublished = "PUBLISHED"
 	StatusFailed    = "FAILED"
+
+	// MaxOutboxAttempts bounds how many times the publisher will try to deliver a
+	// single outbox event before it is parked as FAILED (terminal) and removed
+	// from the PENDING poll. This prevents the busy-retry loop that occurs if a
+	// stuck event is never made terminal, keeping the publisher (and the DB) from
+	// being hammered indefinitely by an undeliverable event.
+	MaxOutboxAttempts = 3
 )
 
 // OutboxRepository defines the interface for outbox persistence.
