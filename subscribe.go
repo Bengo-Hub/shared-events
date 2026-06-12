@@ -79,3 +79,23 @@ func SubscribeWithRebind(log *zap.Logger, js nats.JetStreamContext, subject stri
 		}
 	}()
 }
+
+// QueueSubscribe registers a CORE-NATS queue subscriber and is the uniform
+// replacement for `conn.Subscribe`. NATS delivers each message to exactly ONE
+// member of the named queue group, so with >1 replica the handler runs once per
+// event — not once per pod. Plain `conn.Subscribe` fans every message out to
+// every pod and double-processes; always use this instead for core (non-stream)
+// subjects.
+//
+// Use a DISTINCT queue name PER logical consumer. Two consumers that share a
+// queue group AND have overlapping subject interest would steal each other's
+// messages (e.g. a `pos.sale.finalized` handler and a `pos.>` handler must be in
+// different groups so both still receive the sale event).
+func QueueSubscribe(log *zap.Logger, conn *nats.Conn, subject, queue string, handler nats.MsgHandler) (*nats.Subscription, error) {
+	sub, err := conn.QueueSubscribe(subject, queue, handler)
+	if err == nil && log != nil {
+		log.Info("core queue subscription active",
+			zap.String("subject", subject), zap.String("queue", queue))
+	}
+	return sub, err
+}
