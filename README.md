@@ -2,7 +2,7 @@
 
 **Repository:** `github.com/Bengo-Hub/shared-events`
 
-Standardized event publishing library for BengoBox microservices, implementing the transactional outbox pattern for reliable event delivery.
+Standardized event publishing library for Codevertex microservices, implementing the transactional outbox pattern for reliable event delivery.
 
 ## Features
 
