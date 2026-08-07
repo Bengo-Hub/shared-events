@@ -30,6 +30,12 @@ const (
 	StatusPublished = "PUBLISHED"
 	StatusFailed    = "FAILED"
 
+	// StatusProcessing marks a record as claimed by a publisher instance for an
+	// in-flight publish attempt. See GetPendingRecords / processingClaimStaleAfter
+	// for why this exists: without it, multiple replicas polling the same table
+	// concurrently would repeatedly select and publish the same PENDING rows.
+	StatusProcessing = "PROCESSING"
+
 	// MaxOutboxAttempts bounds how many times the publisher will try to deliver a
 	// single outbox event before it is parked as FAILED (terminal) and removed
 	// from the PENDING poll. This prevents the busy-retry loop that occurs if a

@@ -58,20 +58,44 @@ func (r *SQLOutboxRepository) CreateOutboxRecord(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-// GetPendingRecords fetches pending events for publishing.
+// processingClaimStaleAfter bounds how long a claimed (PROCESSING) row is excluded from
+// re-selection. The publisher's poll loop runs every few seconds and a batch publish
+// completes well within this window, so a PROCESSING row still in that state after it has
+// elapsed means the instance that claimed it died mid-publish (pod OOM/crash/reschedule) —
+// it's safe, and necessary, to let another replica reclaim and retry it.
+const processingClaimStaleAfter = 2 * time.Minute
+
+// GetPendingRecords atomically claims up to `limit` publishable events for THIS instance
+// and returns them.
+//
+// Multiple replicas of the same service all run a publisher polling this table
+// concurrently. A plain "SELECT WHERE status = PENDING" here would let two+ replicas fetch
+// the same rows in the same poll tick, each publish it to NATS (duplicate delivery to every
+// subscriber), and then race on MarkAsPublished's DELETE — the loser logging a spurious
+// "event not found". SELECT ... FOR UPDATE SKIP LOCKED inside the UPDATE's subquery makes
+// the claim atomic and mutually exclusive across replicas: concurrent claims never intersect.
+// The claimed rows are flagged StatusProcessing (not deleted or left PENDING) so a crashed
+// claimer's rows are reclaimable after processingClaimStaleAfter instead of being lost.
 func (r *SQLOutboxRepository) GetPendingRecords(ctx context.Context, limit int) ([]*OutboxRecord, error) {
 	query := `
-		SELECT 
+		UPDATE outbox_events
+		SET status = $1, last_attempt_at = $2
+		WHERE id IN (
+			SELECT id FROM outbox_events
+			WHERE status = $3 OR (status = $1 AND last_attempt_at < $4)
+			ORDER BY created_at ASC
+			LIMIT $5
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING
 			id, tenant_id, aggregate_type, aggregate_id, event_type,
 			payload, status, attempts, last_attempt_at, published_at,
 			error_message, created_at
-		FROM outbox_events
-		WHERE status = $1
-		ORDER BY created_at ASC
-		LIMIT $2
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, StatusPending, limit)
+	now := time.Now().UTC()
+	staleCutoff := now.Add(-processingClaimStaleAfter)
+	rows, err := r.db.QueryContext(ctx, query, StatusProcessing, now, StatusPending, staleCutoff, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query pending records: %w", err)
 	}
