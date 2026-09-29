@@ -64,13 +64,7 @@ func (a *JetStreamAdapter) Publish(_ context.Context, event *Event) error {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	headers := make(nats.Header)
-	headers.Set("event-id", event.ID.String())
-	headers.Set("event-type", event.EventType)
-	headers.Set("aggregate-type", event.AggregateType)
-	headers.Set("aggregate-id", event.AggregateID.String())
-	headers.Set("tenant-id", event.TenantID.String())
-	headers.Set("event-version", event.Version)
+	headers := EventHeaders(event)
 
 	msg := nats.NewMsg(event.Subject())
 	msg.Data = data

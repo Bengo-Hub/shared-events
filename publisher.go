@@ -133,14 +133,7 @@ func (p *Publisher) publishRecord(ctx context.Context, record *OutboxRecord) err
 		return p.repo.MarkAsFailed(ctx, record.ID, errorMsg, time.Now().UTC())
 	}
 
-	// Add headers for event metadata
-	headers := make(nats.Header)
-	headers.Set("event-id", event.ID.String())
-	headers.Set("event-type", event.EventType)
-	headers.Set("aggregate-type", event.AggregateType)
-	headers.Set("aggregate-id", event.AggregateID.String())
-	headers.Set("tenant-id", event.TenantID.String())
-	headers.Set("event-version", event.Version)
+	headers := EventHeaders(event)
 
 	msg := nats.NewMsg(subject)
 	msg.Data = data

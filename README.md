@@ -12,11 +12,13 @@ Standardized event publishing library for Codevertex microservices, implementing
 - ✅ **Event Versioning** - Schema version support
 - ✅ **Retry Logic** - Configurable retry attempts and delays
 - ✅ **Dead Letter Handling** - Failed events after max attempts
+- ✅ **Multi-replica safe** - outbox rows are claimed with `FOR UPDATE SKIP LOCKED` (v0.6.2+) and every JetStream publish carries `Nats-Msg-Id` (v0.7.0+) so a republish is dropped by the server
+- ✅ **Cross-pod fan-out** - `Broadcaster` relays WebSocket/SSE hub messages and cache invalidations to every replica (v0.7.0+)
 
 ## Installation
 
 ```bash
-go get github.com/Bengo-Hub/shared-events@v0.1.0
+go get github.com/Bengo-Hub/shared-events@v0.7.0
 ```
 
 ## Usage
@@ -208,6 +210,35 @@ Example:
 - `subscription.upgraded`
 - `order.placed`
 - `invoice.paid`
+
+### Deduplication header
+
+`EventHeaders(event)` builds the headers for every JetStream publish. It sets `Nats-Msg-Id` to
+the event ID, so if a pod dies after publishing but before marking the outbox row published,
+the replica that reclaims the row republishes into the stream's duplicate window and JetStream
+drops the copy. Consumers still need idempotency (`IdempotencyStore`) for redeliveries.
+
+## Cross-pod fan-out (Broadcaster)
+
+Hubs keep their clients in memory, so a broadcast raised on one pod must be relayed to the
+others. `Broadcaster` does that over core NATS with a plain (non-queue) subscription, so every
+pod receives every message. Subjects are `_rt.<namespace>.<topic>.<tenant>.<scope>`; the `_rt.`
+prefix sits outside every `{service}.>` stream, so nothing is persisted.
+
+```go
+b := events.NewBroadcaster(log, natsConn, "pos")
+_ = b.Subscribe("notif", func(m events.BroadcastMessage) {
+    hub.sendLocal(m.TenantID, m.Scope, m.Data) // deliver to this pod's sockets only
+})
+// Anywhere on any pod:
+_ = b.Publish("notif", tenantID.String(), "user:"+userID.String(), payload)
+```
+
+- `Publish` delivers to this pod's handlers first, then relays; each pod ignores its own echo,
+  so no replica delivers twice.
+- Delivery is best effort (a reconnecting pod misses messages). Keep a client resync path.
+- Never use `QueueSubscribe` for fan-out: a queue group gives each message to one pod only.
+- A nil connection turns it into a local bus (tests, local dev).
 
 ## Configuration
 
