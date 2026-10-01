@@ -246,7 +246,12 @@ The shared registry for every WebSocket/SSE hub. A hub subscribes each connectio
 (`Subscribe(tenant, scopes...)`), runs its own socket write loop over `sub.C`, and publishes with
 `Publish(tenant, scope, data)`: scope `""` reaches the whole tenant, `"user:<id>"` /
 `"outlet:<id>"` / `"task:<id>"` only subscribers holding that scope, on every replica, never
-across tenants. Full buffers drop (counted in `sub.Dropped`). Services keep only their socket code.
+across tenants. Full buffers drop (counted in `sub.Dropped`). `WildcardScope` (`"*"`) subscribers get
+every scoped message of their tenant (v0.7.2).
+
+`Pump(ctx, Socket, sub, hello, reply)` (v0.7.3) is the one socket write loop: hello frame,
+hub messages, 5s write deadline, 25s ping, client-frame replies. `Socket` is three functions, so
+any WebSocket library adapts in a few lines and this module stays dependency-free.
 
 ## Configuration
 

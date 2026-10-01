@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -84,4 +85,61 @@ func TestFanoutHubWildcardScope(t *testing.T) {
 		t.Fatal("wildcard subscriber must receive every scoped message")
 	}
 	none(t, one.C)
+}
+
+// fakeSocket records writes and serves scripted client frames.
+type fakeSocket struct {
+	in     chan []byte
+	writes chan []byte
+}
+
+func (f *fakeSocket) sock() Socket {
+	return Socket{
+		Read: func(ctx context.Context) ([]byte, error) {
+			select {
+			case b, ok := <-f.in:
+				if !ok {
+					return nil, context.Canceled
+				}
+				return b, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		},
+		Write: func(ctx context.Context, b []byte) error { f.writes <- b; return nil },
+		Ping:  func(context.Context) error { return nil },
+	}
+}
+
+func TestPumpHelloMessagesRepliesAndClose(t *testing.T) {
+	h, _ := NewFanoutHub(nil, "t", 4)
+	sub := h.Subscribe("t1")
+	fs := &fakeSocket{in: make(chan []byte, 2), writes: make(chan []byte, 8)}
+	done := make(chan struct{})
+	go func() {
+		Pump(context.Background(), fs.sock(), sub, []byte("hello"), func(b []byte) []byte {
+			if string(b) == "ping" {
+				return []byte("pong")
+			}
+			return nil
+		})
+		close(done)
+	}()
+	if string(recv(t, fs.writes)) != "hello" {
+		t.Fatal("hello must be written first")
+	}
+	h.Publish("t1", "", []byte("msg"))
+	if string(recv(t, fs.writes)) != "msg" {
+		t.Fatal("hub message must be written")
+	}
+	fs.in <- []byte("ping")
+	if string(recv(t, fs.writes)) != "pong" {
+		t.Fatal("reply must be written")
+	}
+	close(fs.in) // client disconnects
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pump must return when the client disconnects")
+	}
 }
