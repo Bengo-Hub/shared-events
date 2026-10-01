@@ -17,7 +17,8 @@ import (
 // Delivery rules:
 //   - Publish(tenant, "", data): every subscriber of that tenant.
 //   - Publish(tenant, scope, data): only subscribers holding that scope (e.g. "user:<id>",
-//     "outlet:<id>", "task:<id>").
+//     "outlet:<id>", "task:<id>"), plus subscribers holding WildcardScope (a screen that
+//     watches every outlet of the tenant).
 //   - Never across tenants.
 //   - A subscriber whose buffer is full misses the message (slow clients never block others);
 //     clients must resync on reconnect.
@@ -29,6 +30,9 @@ type FanoutHub struct {
 	mu   sync.RWMutex
 	subs map[string]map[*Sub]struct{} // tenant -> subscribers
 }
+
+// WildcardScope, held by a subscriber, receives every scoped message of its tenant.
+const WildcardScope = "*"
 
 // Sub is one connected client. Read messages from C until it is closed by Unsubscribe.
 type Sub struct {
@@ -109,7 +113,9 @@ func (h *FanoutHub) deliver(tenant, scope string, data []byte) {
 	for s := range h.subs[tenant] {
 		if scope != "" {
 			if _, ok := s.scopes[scope]; !ok {
-				continue
+				if _, all := s.scopes[WildcardScope]; !all {
+					continue
+				}
 			}
 		}
 		select {

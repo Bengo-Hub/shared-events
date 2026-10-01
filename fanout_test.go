@@ -74,3 +74,14 @@ func TestFanoutHubDropsWhenFull(t *testing.T) {
 		t.Fatalf("dropped=%d, want 1", s.Dropped.Load())
 	}
 }
+
+func TestFanoutHubWildcardScope(t *testing.T) {
+	h, _ := NewFanoutHub(nil, "kds", 4)
+	all := h.Subscribe("t", WildcardScope)
+	one := h.Subscribe("t", "outlet:o1")
+	h.Publish("t", "outlet:o2", []byte("x"))
+	if string(recv(t, all.C)) != "x" {
+		t.Fatal("wildcard subscriber must receive every scoped message")
+	}
+	none(t, one.C)
+}
