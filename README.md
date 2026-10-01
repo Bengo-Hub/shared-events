@@ -240,6 +240,14 @@ _ = b.Publish("notif", tenantID.String(), "user:"+userID.String(), payload)
 - Never use `QueueSubscribe` for fan-out: a queue group gives each message to one pod only.
 - A nil connection turns it into a local bus (tests, local dev).
 
+### FanoutHub (v0.7.1)
+
+The shared registry for every WebSocket/SSE hub. A hub subscribes each connection
+(`Subscribe(tenant, scopes...)`), runs its own socket write loop over `sub.C`, and publishes with
+`Publish(tenant, scope, data)`: scope `""` reaches the whole tenant, `"user:<id>"` /
+`"outlet:<id>"` / `"task:<id>"` only subscribers holding that scope, on every replica, never
+across tenants. Full buffers drop (counted in `sub.Dropped`). Services keep only their socket code.
+
 ## Configuration
 
 Customize publisher behavior:
