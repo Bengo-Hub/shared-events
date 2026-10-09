@@ -18,7 +18,7 @@ Standardized event publishing library for Codevertex microservices, implementing
 ## Installation
 
 ```bash
-go get github.com/Bengo-Hub/shared-events@v0.7.0
+go get github.com/Bengo-Hub/shared-events@v0.7.4
 ```
 
 ## Usage
@@ -252,6 +252,27 @@ every scoped message of their tenant (v0.7.2).
 `Pump(ctx, Socket, sub, hello, reply)` (v0.7.3) is the one socket write loop: hello frame,
 hub messages, 5s write deadline, 25s ping, client-frame replies. `Socket` is three functions, so
 any WebSocket library adapts in a few lines and this module stays dependency-free.
+
+## Provisioning only relevant users (UserRelevance, v0.7.4)
+
+`UserRelevance.Relevant(ctx, tenantID, payload)` decides whether an `auth.user.*` event concerns
+this service, so a service provisions only the people who work in it. The rules, in order:
+
+1. Admin-level roles (`AdminRoles`, default `DefaultAdminRoles`) are always relevant.
+2. When the payload names outlets (`outlet_ids` or `outlet_id`), the event is relevant when one
+   of them is an outlet the service mirrors (`OutletKnown`).
+3. Without outlets, a role unique to the service (`ServiceRoles`) is relevant.
+4. Anything else is skipped; the person is still provisioned on first sign-in (JIT).
+
+```go
+rel := eventslib.UserRelevance{
+    ServiceRoles: map[string]bool{"doctor": true, "nurse": true},
+    OutletKnown:  outlets.Exists,
+}
+if !rel.Relevant(ctx, evt.TenantID, evt.Payload) {
+    return nil
+}
+```
 
 ## Configuration
 
