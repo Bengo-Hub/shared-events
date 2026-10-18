@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -20,7 +21,13 @@ CREATE TABLE IF NOT EXISTS processed_events (
     consumer     text        NOT NULL,
     processed_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (event_id, consumer)
-);`
+);
+CREATE INDEX IF NOT EXISTS processed_events_processed_at_idx ON processed_events (processed_at);`
+
+// DefaultProcessedRetention is how long a claim is kept. JetStream only redelivers within its ack
+// and duplicate windows (minutes to hours), so a month leaves a wide margin; older rows only cost
+// disk and backup size.
+const DefaultProcessedRetention = 30 * 24 * time.Hour
 
 // IdempotencyStore records which (event_id, consumer) pairs have already been
 // handled so a JetStream redelivery — or a duplicate delivered to a second
@@ -85,6 +92,40 @@ func (s *IdempotencyStore) MarkProcessed(ctx context.Context, eventID uuid.UUID,
 		return fmt.Errorf("mark processed event: %w", err)
 	}
 	return nil
+}
+
+// Prune deletes claims older than olderThan in batches of batchSize (default 5000), so a large
+// backlog never holds one long lock, and returns how many rows went. Run it daily; the table
+// otherwise grows with every event ever consumed.
+func (s *IdempotencyStore) Prune(ctx context.Context, olderThan time.Duration, batchSize int) (int64, error) {
+	if olderThan <= 0 {
+		olderThan = DefaultProcessedRetention
+	}
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	cutoff := time.Now().Add(-olderThan)
+	var total int64
+	for {
+		res, err := s.db.ExecContext(ctx,
+			`DELETE FROM processed_events WHERE ctid IN (
+			   SELECT ctid FROM processed_events WHERE processed_at < $1 LIMIT $2)`,
+			cutoff, batchSize)
+		if err != nil {
+			return total, fmt.Errorf("prune processed events: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("prune rows affected: %w", err)
+		}
+		total += n
+		if n < int64(batchSize) {
+			return total, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+	}
 }
 
 // ErrNoEventID is returned when a message carries no usable event id.

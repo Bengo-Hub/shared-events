@@ -218,6 +218,14 @@ the event ID, so if a pod dies after publishing but before marking the outbox ro
 the replica that reclaims the row republishes into the stream's duplicate window and JetStream
 drops the copy. Consumers still need idempotency (`IdempotencyStore`) for redeliveries.
 
+### Idempotency ledger retention
+
+`IdempotencyStore` keeps one `processed_events` row per consumed event. Call
+`Prune(ctx, events.DefaultProcessedRetention, 0)` once a day (v0.8.0): it deletes claims older than
+30 days in batches of 5000, using the `processed_at` index `EnsureSchema` creates. Without it the
+table grows with every event ever consumed; a redelivery storm in August 2026 left 4.8M rows (about
+1 GB) in subscriptions-api.
+
 ## Cross-pod fan-out (Broadcaster)
 
 Hubs keep their clients in memory, so a broadcast raised on one pod must be relayed to the
