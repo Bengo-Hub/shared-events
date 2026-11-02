@@ -12,6 +12,11 @@ import (
 // (codevertex-demo hosts every vertical), and role names such as manager, cashier and member are
 // shared by all of them, so neither the tenant nor a generic role proves relevance.
 //
+// auth-api decides it now (2026-11-03): auth.user created/updated/pin_set events carry `services`,
+// the services that should keep a local copy of the member ("*" = every service). With Service set,
+// that list decides when present (Relevant), and Revoked tells a service to remove its copy. The
+// rules below only apply to events without the list (older events, or auth-api could not decide).
+//
 // The rules, in order:
 //  1. Admin-level roles (AdminRoles, defaulting to DefaultAdminRoles) are always relevant: a
 //     tenant's administrators run every product it subscribes to.
@@ -22,6 +27,9 @@ import (
 //  4. Anything else is not. A person skipped here is still provisioned on their first real sign-in
 //     to the service (JIT), so nobody who uses it is locked out.
 type UserRelevance struct {
+	// Service is this service's tag (pos, inventory, ...): the event's services list decides when
+	// present. Empty keeps only the rules below.
+	Service string
 	// AdminRoles overrides DefaultAdminRoles when set.
 	AdminRoles map[string]bool
 	// ServiceRoles are role names only this service uses (doctor, waiter, librarian...).
@@ -38,6 +46,11 @@ var DefaultAdminRoles = map[string]bool{
 
 // Relevant applies the rules to one event payload.
 func (r UserRelevance) Relevant(ctx context.Context, tenantID uuid.UUID, payload map[string]any) bool {
+	if r.Service != "" {
+		if services, known := PayloadServices(payload); known {
+			return servicesAllow(services, r.Service)
+		}
+	}
 	roles := PayloadStrings(payload["roles"])
 	admin := r.AdminRoles
 	if admin == nil {
@@ -61,6 +74,42 @@ func (r UserRelevance) Relevant(ctx context.Context, tenantID uuid.UUID, payload
 	}
 	for _, role := range roles {
 		if r.ServiceRoles[strings.ToLower(role)] {
+			return true
+		}
+	}
+	return false
+}
+
+// Revoked reports that the event's services list exists and leaves this service out: the member
+// must not have a local copy here, so an existing one is removed. False without Service or without
+// the list, so an older event or an undecided one never removes anybody.
+func (r UserRelevance) Revoked(payload map[string]any) bool {
+	if r.Service == "" {
+		return false
+	}
+	services, known := PayloadServices(payload)
+	return known && !servicesAllow(services, r.Service)
+}
+
+// AllServices is the services list entry meaning every service.
+const AllServices = "*"
+
+// PayloadServices reads the services list auth-api puts on auth.user events. known=false when
+// the payload has none (null counts as none); an empty list is a decided "no services".
+func PayloadServices(payload map[string]any) (services []string, known bool) {
+	switch v := payload["services"].(type) {
+	case []string:
+		return v, true
+	case []any:
+		return PayloadStrings(v), true
+	default:
+		return nil, false
+	}
+}
+
+func servicesAllow(services []string, service string) bool {
+	for _, s := range services {
+		if s == AllServices || s == service {
 			return true
 		}
 	}
