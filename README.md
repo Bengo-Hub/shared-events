@@ -314,3 +314,14 @@ If you're currently publishing directly to NATS:
 
 Events will now be reliably delivered even if NATS is temporarily unavailable.
 
+
+## Low-balance alerts (`balancealert`, v0.11.0+)
+
+One contract for every kind of credit: tenant wallets in subscriptions-api (AI credits, eTIMS API tokens, SMS, WhatsApp and any service added to its credit registry) and the platform owner's provider balances in marketflow-ai (fal, Higgsfield, ElevenLabs). Each raises `billing.balance.low` (aggregate `billing`, event type `balance.low`), and notifications-api has one consumer for it.
+
+- `Crossed(before, after, lowMark)` is the check for a spend path; `LevelOf(remaining, lowMark)` is the check for a poller.
+- `LowMark(total, ratio)` is the mark (default ratio 0.20).
+- `Alert.DedupeKey()` is the "once" key: scope, owner, resource, level, period and an optional epoch.
+- `Notify(ctx, claim, ttl, alert, publish)` claims the key, then publishes. The caller supplies the claim (Redis `ClaimOnce`, or a ledger marker inside the spend's own transaction) and the publish (a JetStream publish or an outbox insert).
+
+The stream that owns `billing.>` is subscriptions-api's `subscription` stream.
