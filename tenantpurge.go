@@ -34,6 +34,9 @@ var purgeReasons = map[string]bool{
 	PurgeReasonDormancy: true, PurgeReasonRegistrationRejected: true, PurgeReasonTenantDeleted: true,
 }
 
+// IsTenantPurgeReason reports whether a service acts on a tenant.purge with this reason.
+func IsTenantPurgeReason(reason string) bool { return purgeReasons[reason] }
+
 // ConfirmedTenantPurge reports the tenant a tenant.purge event deletes, and whether the event is
 // a confirmed purge for a known reason. ok=false means: ack and do nothing.
 func ConfirmedTenantPurge(evt *Event) (tenantID uuid.UUID, reason string, ok bool) {
