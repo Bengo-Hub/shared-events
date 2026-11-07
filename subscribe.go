@@ -49,6 +49,14 @@ func missingDeliverGroup(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "without a deliver group")
 }
 
+// streamMissing reports a consumer that started before its stream exists, usually because the
+// publishing service (which ensures the stream) has not run yet. This is not fatal: giving up here
+// left the consumer silent until its next restart, with no further error, so every message of a
+// new service went undelivered.
+func streamMissing(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "stream not found")
+}
+
 // SubscribeWithRebind establishes a durable JetStream push subscription with the
 // layered resilience above. It runs in the background so it never blocks startup;
 // the subscription is retained by the NATS client for the life of the
@@ -176,6 +184,15 @@ func SubscribeQueueWithRebind(log *zap.Logger, js nats.JetStreamContext, stream,
 						zap.String("consumer", queue), zap.Error(derr))
 				}
 				continue // retry immediately
+			} else if streamMissing(err) {
+				// Wait for the stream for as long as it takes; this does not use up the attempts.
+				if log != nil {
+					log.Warn("jetstream stream not found yet; waiting for it",
+						zap.String("subject", subject), zap.String("queue", queue))
+				}
+				attempt--
+				time.Sleep(maxBackoff)
+				continue
 			} else if !isAlreadyBound(err) && !missingDeliverGroup(err) {
 				if log != nil {
 					log.Error("jetstream queue subscribe failed (non-retryable)",
